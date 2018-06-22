@@ -32,12 +32,12 @@ int main(int* argc, char** argv)
 
   fgets(input, BUFFERSIZE, stdin);
 
-  res_search_input = strchr(input, '\n');
+  char *res_search_input = strchr(input, '\n');
   if(res_search_input != NULL){
     *res_search_input = '\0';
   }
 
-  if(in_file == NULL){
+  if(input == NULL){
     printf("%s\n", "Goodbye!");
   }
 
