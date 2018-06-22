@@ -26,6 +26,23 @@
 int main(int* argc, char** argv)
 {
 
+  char input[BUFFERSIZE];
+
+  printf(PROMPT);
+
+  fgets(input, BUFFERSIZE, stdin);
+
+  res_search_input = strchr(input, '\n');
+  if(res_search_input != NULL){
+    *res_search_input = '\0';
+  }
+
+  if(in_file == NULL){
+    printf("%s\n", "Goodbye!");
+  }
+
+
+
     
-return 0;
+  return 0;
 }
