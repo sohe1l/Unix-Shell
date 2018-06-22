@@ -27,10 +27,15 @@ int main(int* argc, char** argv)
 {
 
   char input[BUFFERSIZE];
+  char *myargv[256];
+  int myargc = 0;
+
+
 
   printf(PROMPT);
 
   fgets(input, BUFFERSIZE, stdin);
+
 
   char *res_search_input = strchr(input, '\n');
   if(res_search_input != NULL){
@@ -41,7 +46,18 @@ int main(int* argc, char** argv)
     printf("%s\n", "Goodbye!");
   }
 
+  char *token = strtok(input, " ");
 
+   while( token != NULL ) {
+      printf( " %s\n", token );
+      
+      char* temp = token;
+
+      myargv[myargc] = temp;
+      myargc = myargc + 1;
+
+      token = strtok(NULL, " ");
+   }
 
     
   return 0;
