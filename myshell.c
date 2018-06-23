@@ -15,6 +15,10 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <errno.h>
+
+#include <sys/types.h>
+#include <sys/wait.h>
 
 //Max amount allowed to read from input
 #define BUFFERSIZE 256
@@ -24,7 +28,7 @@
 #define PROMPTSIZE sizeof(PROMPT)
 
 #define EXIT_KEY "exit"
-
+#define WHITESPACE " \t\r\n\v\f"
 
 
 
@@ -38,43 +42,83 @@
 #define RESET "\x1B[0m"
 
 
-
-void runCommand(char** av){
-
-      printf(GRN "before if %d %d\n" RESET , getpid(), getppid());
+enum io_type {STANDARD, OUT_WRITE_FILE, OUT_APPEND_FILE, IN_FILE};
 
 
-    int status;
-    int child_pid = fork();
+void runCommand(char** av, int is_bg,enum io_type ioType, char* ioFile){
 
+  printf(GRN "before if %d %d\n" RESET , getpid(), getppid());
 
-    if(child_pid < 0){
-      printf("Error while forking child process.\n");
-    }else if(child_pid == 0){
-      printf(RED "if1 %d %d\n" RESET , getpid(), getppid() );
+  int fp;
+  if(ioType == OUT_WRITE_FILE){
+    fp = open(ioFile, O_WRONLY | O_CREAT, 0666);
+  }else if(ioType == OUT_APPEND_FILE){
+    printf("appending \n");
+    fp = open(ioFile,  O_APPEND | O_CREAT, 0666);
+  }else if(ioType == IN_FILE){
+    fp = open(ioFile, O_RDONLY);
+  }
 
-      execvp(av[0], av);
+  int status;
+  int fd[2];
+  int child_pid = fork();
 
-      printf(RED "if2 %d %d\n" RESET, getpid(), getppid() );
+  
 
-    }else{
+  if(child_pid < 0){
+    printf("Error while forking child process.\n");
+  }else if(child_pid == 0){ // child process
 
-      printf(BLU "else1 %d %d\n" RESET, getpid(), getppid() );
-
-
-      while(wait(&status) != child_pid);
-      printf(BLU "else2 %d %d\n" RESET, getpid(), getppid() );
-
-      /*
-      pid_t tpid;
-      do{
-        tpid = wait(&status);
-        if(tpid != child_pid) process_terminated(tpid);
-      }while(tpid != child_pid);
-      */
+    if(is_bg){
+      fclose(stdin);
+      fopen("/dev/null/", "r");
     }
-}
 
+    pipe(fd);
+
+    if(ioType == OUT_WRITE_FILE){
+      //close(1);
+      dup2(fp, 1);
+    }else if(ioType == OUT_APPEND_FILE){
+      //close(1);
+      dup2(fp, 1);
+    }else if(ioType == IN_FILE){
+      //close(0);
+      dup2(fp, 0);
+    }
+    
+    printf(RED "if1 %d %d\n" RESET , getpid(), getppid() );
+
+    if(execvp(av[0], av) == -1){
+            printf(RED "Error occured: %s\n" RESET, strerror(errno) );
+
+      exit(1);
+    }else{
+      exit(0);
+    }
+
+    
+    printf(RED "if2 %d %d\n" RESET, getpid(), getppid() );
+
+  }else{ // main process
+
+    printf(BLU "else1 %d %d\n" RESET, getpid(), getppid() );
+
+    if(!is_bg){
+      while(wait(&status) != child_pid);
+    }
+    
+    printf(BLU "else2 %d %d\n" RESET, getpid(), getppid() );
+
+    /*
+    pid_t tpid;
+    do{
+      tpid = wait(&status);
+      if(tpid != child_pid) process_terminated(tpid);
+    }while(tpid != child_pid);
+    */
+  }
+}
 
 
 
@@ -86,26 +130,35 @@ int main(int* argc, char** argv)
   char *HOME = getenv("HOME");
   char input[BUFFERSIZE];
   char *myargv[256];
-  int myargc = 0;
+  int myargc;
+  int is_bg = 0;
+  enum io_type ioType;
+  char *ioFile;
 
   printf(MAG "Starting %d %d\n" RESET, getpid(), getppid() );
 
 
 
 
-/*
 
-  char *args[1];
-   args[0] = "ls\0";
-   //args[1] = "\0";
-   //args[1] = "/home/\0";
+  // char *args[50];
+  //  args[0] = "cat";
+  //  args[1] = "readme.txt";
+  //  args[2] = "README.md";
+  //  args[3] = '\0';
+  //  //args[1] = "/home/\0";
 
-  execvp(args[0], args);
+  // runCommand(args);
 
-  return 0;
-*/
+  // return 0;
+
 
 while(1){
+
+  myargc = 0;
+  is_bg = 0;
+  ioType = STANDARD;
+  ioFile = "";
 
   printf(MAG "While %d %d\n" RESET, getpid(), getppid() );
 
@@ -123,49 +176,69 @@ while(1){
     printf("%s\n", "Goodbyezzzzz!");
   }
 
-  char *token = strtok(input, " ");
+  char *token = strtok(input, WHITESPACE);
 
-   while( token != NULL ) {
-      printf( " %s\n", token );
-      
-      char* temp = token;
+  while( token != NULL ) {
 
-      myargv[myargc] = temp;
-      myargc = myargc + 1;
+    if(strcmp(token, ">")==0){
 
-      token = strtok(NULL, " ");
-   }
+      ioType = OUT_WRITE_FILE;
+
+    }else if(strcmp(token, ">>")==0){
+
+      ioType = OUT_APPEND_FILE;
+
+    }else if(strcmp(token, "<")==0){
+
+      ioType = IN_FILE;
+
+    }else{
+
+      if(ioType != STANDARD && strcmp(ioFile,"") == 0){
+        ioFile = token;
+      }else if(ioType != STANDARD && strcmp(ioFile,"") != 0){
+        printf("Token is: %s   Length: %zu\n", token, strlen(token) );
+        printf("ERROR INVALID PATTERN\n");
+        exit(1); // should noy really end
+      }else{
+        myargv[myargc] = token;
+        myargc = myargc + 1;
+      }
+
+    }
+
+
+    token = strtok(NULL, WHITESPACE);
+  }
+
+   // add the end of arguments
+    myargv[myargc] = '\0';
+    myargc = myargc + 1;
 
    // run 
 
 
    if( strcmp(myargv[0], EXIT_KEY) == 0){
-
-    //int l = strlen("ls\0");
-
-    //printf("Len %d \n", l);
-
-
-    //strlen(myargv[0]);
-    //printf( myargv[0] );
-    //prtinf(strlen(myargv[0]));
-
-    
-
-
-
     printf("%s\n", "Goodbye!");
-    break;
-        printf("%s\n", "AFTER BREAK!");
-
     return 0;
-        printf("%s\n", "AFTER RETURN!");
-
-   }else{
-    printf(MAG "Before RUN %d %d\n" RESET, getpid(), getppid() );
-    runCommand(myargv);
-    printf(MAG "After Run %d %d\n" RESET, getpid(), getppid() );
    }
+
+  char *res_search_bg = strchr(myargv[myargc-2], '&');
+  if(res_search_bg != NULL){
+    *res_search_bg = '\0';
+    is_bg = 1;
+  }
+
+
+
+    printf(MAG "Before RUN %d %d\n" RESET, getpid(), getppid() );
+
+    printf(MAG "Count  Run %d \n" RESET, myargc );
+
+    runCommand(myargv, is_bg, ioType, ioFile);
+
+    printf(MAG "After Run %d %d\n" RESET, getpid(), getppid() );
+   
 
 }
   return 0;
