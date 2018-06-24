@@ -49,22 +49,11 @@ void runCommand(char** av, int is_bg,enum io_type ioType, char* ioFile){
 
   printf(GRN "before if %d %d\n" RESET , getpid(), getppid());
 
-  int fp;
-  if(ioType == OUT_WRITE_FILE){
-    fp = open(ioFile, O_WRONLY | O_CREAT, 0666);
-  }else if(ioType == OUT_APPEND_FILE){
-    printf("appending \n");
-    fp = open(ioFile,  O_APPEND | O_CREAT, 0666);
-  }else if(ioType == IN_FILE){
-    fp = open(ioFile, O_RDONLY);
-  }
-
   int status;
   int fd[2];
   int child_pid = fork();
 
   
-
   if(child_pid < 0){
     printf("Error while forking child process.\n");
   }else if(child_pid == 0){ // child process
@@ -76,29 +65,41 @@ void runCommand(char** av, int is_bg,enum io_type ioType, char* ioFile){
 
     pipe(fd);
 
+    int fp;
     if(ioType == OUT_WRITE_FILE){
-      //close(1);
-      dup2(fp, 1);
+      fp = open(ioFile, O_TRUNC | O_WRONLY | O_CREAT, 0666);
     }else if(ioType == OUT_APPEND_FILE){
-      //close(1);
-      dup2(fp, 1);
+      printf("appending \n");
+      fp = open(ioFile,  O_APPEND | O_WRONLY | O_CREAT, 0666);
     }else if(ioType == IN_FILE){
-      //close(0);
-      dup2(fp, 0);
+      fp = open(ioFile, O_RDONLY);
+    }
+
+
+    if(ioType == OUT_WRITE_FILE){
+      close(1);
+      dup(fp);
+      //dup2(fp, 1);
+    }else if(ioType == OUT_APPEND_FILE){
+      close(1);
+      dup(fp);
+      //dup2(fp, 1);
+    }else if(ioType == IN_FILE){
+      close(0);
+      dup(fp);
+      //dup2(fp, 0);
     }
     
-    printf(RED "if1 %d %d\n" RESET , getpid(), getppid() );
 
     if(execvp(av[0], av) == -1){
-            printf(RED "Error occured: %s\n" RESET, strerror(errno) );
-
+      if(fp) close(fp);
       exit(1);
     }else{
+      if(fp) close(fp);
       exit(0);
     }
 
     
-    printf(RED "if2 %d %d\n" RESET, getpid(), getppid() );
 
   }else{ // main process
 
@@ -123,6 +124,94 @@ void runCommand(char** av, int is_bg,enum io_type ioType, char* ioFile){
 
 
 
+
+
+int runPipe(char** av){
+
+  int status;
+  int fd[2];
+  pipe(fd);
+  int child_pid = fork();
+  
+  if(child_pid < 0){
+    printf("Error while forking child process.\n");
+  }else if(child_pid == 0){ // child process
+
+    while((dup2(fd[1], 1)==-1) && (errno==EINTR)){}
+
+    //dup2(fd[1], STDOUT_FILENO);
+    close(fd[1]);
+    close(fd[0]);
+    
+
+    execvp(av[0], av);
+    exit(1);
+
+    
+
+  }else{ // main process
+    close(fd[1]);
+
+    while(wait(&status) != child_pid);
+    return fd[0];
+  }
+
+  
+}
+
+
+
+
+
+
+
+
+int runPipe2(char** av, int fd_input){
+
+  int status;
+  int fd_in[2], fd_out[2];
+  pipe(fd_in);
+  pipe(fd_out);
+  int child_pid = fork();
+  
+  if(child_pid < 0){
+    printf("Error while forking child process.\n");
+  }else if(child_pid == 0){ // child process
+
+    while((dup2(fd_in[0], 0)==-1) && (errno==EINTR)){}
+    close(fd_in[1]);
+    close(fd_in[0]);
+
+    while((dup2(fd_out[1], 1)==-1) && (errno==EINTR)){}
+    close(fd_out[1]);
+    close(fd_out[0]);
+    
+    execvp(av[0], av);
+    exit(1);
+
+  }else{ // main process
+    close(fd_in[0]);
+    char buffer[256];
+    int res_file_read;
+    while(res_file_read = read(fd_input, buffer, 256)){
+      write(fd_in[1], buffer, res_file_read);
+    }
+    close(fd_in[1]);
+
+    close(fd_out[1]);
+    while(wait(&status) != child_pid);
+    return fd_out[0];
+  }
+
+  
+}
+
+
+
+
+
+
+
 int main(int* argc, char** argv)
 {
 
@@ -136,8 +225,6 @@ int main(int* argc, char** argv)
   char *ioFile;
 
   printf(MAG "Starting %d %d\n" RESET, getpid(), getppid() );
-
-
 
 
 
@@ -159,6 +246,8 @@ while(1){
   is_bg = 0;
   ioType = STANDARD;
   ioFile = "";
+  int isPipe = 0;
+  int pipe_res_fd = 0;
 
   printf(MAG "While %d %d\n" RESET, getpid(), getppid() );
 
@@ -180,6 +269,8 @@ while(1){
 
   while( token != NULL ) {
 
+    printf("TOKEN: %s\n", token);
+
     if(strcmp(token, ">")==0){
 
       ioType = OUT_WRITE_FILE;
@@ -192,8 +283,52 @@ while(1){
 
       ioType = IN_FILE;
 
-    }else{
+    }else if(strcmp(token, "|")==0){
 
+      printf(MAG "Inside pipe %d %d\n" RESET, getpid(), getppid() );
+
+      myargv[myargc] = '\0';
+      myargc = myargc + 1;
+
+      if(pipe_res_fd == 0 ){
+        printf(MAG "Inside pipe if1 %d %d\n" RESET, getpid(), getppid());
+
+        pipe_res_fd = runPipe(myargv);
+      }else{
+        printf(MAG "Inside pipe if2 %d %d\n" RESET, getpid(), getppid());
+        pipe_res_fd = runPipe2(myargv, pipe_res_fd);
+      }
+
+
+      //clear args
+      myargc = 0;
+
+
+
+      // printf("AFTER THIS \n");
+      // char buffer[10];
+      // int res_file_read;
+      // while(res_file_read = read(fd, buffer, 10)){
+      //   printf("%s\n", "while");
+      //   write(1, buffer, res_file_read);
+      // }
+      // printf("AFTER THIS \n");
+
+
+  // char *ag[50];
+  //  ag[0] = "grep";
+  //  ag[1] = "txt";
+  //  ag[2] = '\0';
+
+  // int fd4 = runPipe2(ag, fd);
+
+    // char buffer[10];
+    // int res_file_read;
+    // while(res_file_read = read(fd4, buffer, 10)){
+    //   write(1, buffer, res_file_read);
+    // }
+
+    }else{
       if(ioType != STANDARD && strcmp(ioFile,"") == 0){
         ioFile = token;
       }else if(ioType != STANDARD && strcmp(ioFile,"") != 0){
@@ -210,35 +345,39 @@ while(1){
 
     token = strtok(NULL, WHITESPACE);
   }
-
    // add the end of arguments
     myargv[myargc] = '\0';
     myargc = myargc + 1;
-
-   // run 
-
 
    if( strcmp(myargv[0], EXIT_KEY) == 0){
     printf("%s\n", "Goodbye!");
     return 0;
    }
 
-  char *res_search_bg = strchr(myargv[myargc-2], '&');
-  if(res_search_bg != NULL){
-    *res_search_bg = '\0';
-    is_bg = 1;
-  }
+    char *res_search_bg = strchr(myargv[myargc-2], '&');
+    if(res_search_bg != NULL){
+      *res_search_bg = '\0';
+      is_bg = 1;
+    }
+
+    if(pipe_res_fd != 0){
 
 
+      pipe_res_fd = runPipe2(myargv, pipe_res_fd);
+      
+      char buffer[10];
+      int res_file_read;
+      while(res_file_read = read(pipe_res_fd, buffer, 10)){
+        write(1, buffer, res_file_read);
+      }
 
-    printf(MAG "Before RUN %d %d\n" RESET, getpid(), getppid() );
+    }else{
+      
+      runCommand(myargv, is_bg, ioType, ioFile);
 
-    printf(MAG "Count  Run %d \n" RESET, myargc );
+    }
+    
 
-    runCommand(myargv, is_bg, ioType, ioFile);
-
-    printf(MAG "After Run %d %d\n" RESET, getpid(), getppid() );
-   
 
 }
   return 0;
