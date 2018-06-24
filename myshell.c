@@ -20,10 +20,15 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+
+//keyboard stuff
+#include <linux/input.h>
+
+
 //Max amount allowed to read from input
 #define BUFFERSIZE 256
 //Shell prompt
-#define PROMPT "myShell >> "
+#define PROMPT "myShell %s >> "
 //sizeof shell prompt
 #define PROMPTSIZE sizeof(PROMPT)
 
@@ -43,6 +48,57 @@
 
 
 enum io_type {STANDARD, OUT_WRITE_FILE, OUT_APPEND_FILE, IN_FILE};
+
+
+char current_dir[BUFFERSIZE];
+char *home_dir;
+
+
+
+
+char *replaceWord(const char *s, const char *oldW,
+                                 const char *newW)
+{
+    char *result;
+    int i, cnt = 0;
+    int newWlen = strlen(newW);
+    int oldWlen = strlen(oldW);
+ 
+    // Counting the number of times old word
+    // occur in the string
+    for (i = 0; s[i] != '\0'; i++)
+    {
+        if (strstr(&s[i], oldW) == &s[i])
+        {
+            cnt++;
+ 
+            // Jumping to index after the old word.
+            i += oldWlen - 1;
+        }
+    }
+ 
+    // Making new string of enough length
+    result = (char *)malloc(i + cnt * (newWlen - oldWlen) + 1);
+ 
+    i = 0;
+    while (*s)
+    {
+        // compare the substring with the result
+        if (strstr(s, oldW) == s)
+        {
+            strcpy(&result[i], newW);
+            i += newWlen;
+            s += oldWlen;
+        }
+        else
+            result[i++] = *s++;
+    }
+ 
+    result[i] = '\0';
+    return result;
+}
+
+
 
 
 void runCommand(char** av, int is_bg,enum io_type ioType, char* ioFile){
@@ -206,9 +262,50 @@ int runPipe2(char** av, int fd_input){
   
 }
 
+void run_change_dir(char *dir){
+
+  char *home_dir_with_slash = malloc(strlen(home_dir) +2);
+  strcpy(home_dir_with_slash, home_dir);
+  strcat(home_dir_with_slash, "/");
+
+  char *chdir_path = replaceWord(dir, "~", home_dir_with_slash);
+
+  if(chdir(chdir_path) != 0){
+    perror("Failed changing directory"); 
+  }
+  getcwd(current_dir, BUFFERSIZE);
+}
+
+
+void print_prompt(){
+  
+  char *result = replaceWord(current_dir, home_dir, "~");
+  
+  if(strcmp(result, "~")==0){
+    result = "~/";
+  }
+
+  printf(GRN PROMPT RESET, result);
+
+}
 
 
 
+
+void  INThandler(int sig)
+{
+     char  c;
+
+     signal(sig, SIG_IGN);
+     printf("OUCH, did you hit Ctrl-C?\n"
+            "Do you really want to quit? [y/n] ");
+     c = getchar();
+     if (c == 'y' || c == 'Y')
+          exit(0);
+     else
+          signal(SIGINT, INThandler);
+     getchar(); // Get new line character
+}
 
 
 
@@ -216,7 +313,6 @@ int main(int* argc, char** argv)
 {
 
   //get home path
-  char *HOME = getenv("HOME");
   char input[BUFFERSIZE];
   char *myargv[256];
   int myargc;
@@ -224,7 +320,79 @@ int main(int* argc, char** argv)
   enum io_type ioType;
   char *ioFile;
 
-  printf(MAG "Starting %d %d\n" RESET, getpid(), getppid() );
+  // get home dir and remove last slash if any
+  home_dir = getenv("HOME");
+  // if(home_dir[ strlen(home_dir) - 1 ] == '/'){
+  //   home_dir[ strlen(home_dir) - 1 ] == '\0';
+  //   printf("UPDATE HDRI\n");
+  // }
+
+  printf("HDIR %s\n", home_dir);
+
+  getcwd(current_dir, BUFFERSIZE);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+if (getchar() == '^') { // if the first value is esc
+    
+    printf("if1\n");
+
+    getchar(); // skip the [
+    getchar();
+    printf("if2\n");
+
+    switch(getchar()) { // the real value
+        case 'A':
+            // code for arrow up
+          printf("UP\n");
+            break;
+        case 'B':
+        printf("DOWN\n");
+            // code for arrow down
+            break;
+        case 'C':
+        printf("RIGHT\n");
+            // code for arrow right
+            break;
+        case 'D':
+        printf("LEFT\n");
+            // code for arrow left
+            break;
+    }
+    printf("after\n");
+}
+
+
 
 
 
@@ -249,9 +417,9 @@ while(1){
   int isPipe = 0;
   int pipe_res_fd = 0;
 
-  printf(MAG "While %d %d\n" RESET, getpid(), getppid() );
+  print_prompt();
 
-  printf(PROMPT);
+  
 
   fgets(input, BUFFERSIZE, stdin);
 
@@ -349,9 +517,21 @@ while(1){
     myargv[myargc] = '\0';
     myargc = myargc + 1;
 
+
+
    if( strcmp(myargv[0], EXIT_KEY) == 0){
     printf("%s\n", "Goodbye!");
     return 0;
+   }
+
+   if( strcmp(myargv[0], "pwd") == 0){
+    printf("%s\n", current_dir);
+    continue;
+   }
+
+  if( strcmp(myargv[0], "cd") == 0){
+    run_change_dir(myargv[1]);
+    continue;
    }
 
     char *res_search_bg = strchr(myargv[myargc-2], '&');
