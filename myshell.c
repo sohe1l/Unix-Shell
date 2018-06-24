@@ -22,8 +22,8 @@
 
 
 //keyboard stuff
-#include <linux/input.h>
-
+#include <ncurses.h>
+#include <ctype.h>
 
 //Max amount allowed to read from input
 #define BUFFERSIZE 256
@@ -291,22 +291,19 @@ void print_prompt(){
 
 
 
+int r,c,nrows,ncols;
+void draw(char dc){
+  move(r,c); // curses call to move cursor to row r, column c
+  delch();
+  insch(dc);  // curses calls to replace character under cursor by dc
+  refresh();  // curses call to update screen
+  r++;
+  if(r == nrows){
+    r =0;
+    c++;
 
-void  INThandler(int sig)
-{
-     char  c;
-
-     signal(sig, SIG_IGN);
-     printf("OUCH, did you hit Ctrl-C?\n"
-            "Do you really want to quit? [y/n] ");
-     c = getchar();
-     if (c == 'y' || c == 'Y')
-          exit(0);
-     else
-          signal(SIGINT, INThandler);
-     getchar(); // Get new line character
+  }
 }
-
 
 
 int main(int* argc, char** argv)
@@ -314,6 +311,7 @@ int main(int* argc, char** argv)
 
   //get home path
   char input[BUFFERSIZE];
+  int input_c = 0;
   char *myargv[256];
   int myargc;
   int is_bg = 0;
@@ -332,82 +330,6 @@ int main(int* argc, char** argv)
   getcwd(current_dir, BUFFERSIZE);
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-if (getchar() == '^') { // if the first value is esc
-    
-    printf("if1\n");
-
-    getchar(); // skip the [
-    getchar();
-    printf("if2\n");
-
-    switch(getchar()) { // the real value
-        case 'A':
-            // code for arrow up
-          printf("UP\n");
-            break;
-        case 'B':
-        printf("DOWN\n");
-            // code for arrow down
-            break;
-        case 'C':
-        printf("RIGHT\n");
-            // code for arrow right
-            break;
-        case 'D':
-        printf("LEFT\n");
-            // code for arrow left
-            break;
-    }
-    printf("after\n");
-}
-
-
-
-
-
-  // char *args[50];
-  //  args[0] = "cat";
-  //  args[1] = "readme.txt";
-  //  args[2] = "README.md";
-  //  args[3] = '\0';
-  //  //args[1] = "/home/\0";
-
-  // runCommand(args);
-
-  // return 0;
-
-
 while(1){
 
   myargc = 0;
@@ -418,8 +340,6 @@ while(1){
   int pipe_res_fd = 0;
 
   print_prompt();
-
-  
 
   fgets(input, BUFFERSIZE, stdin);
 
