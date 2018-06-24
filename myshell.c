@@ -16,14 +16,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
-
 #include <sys/types.h>
 #include <sys/wait.h>
-
-
-//keyboard stuff
-#include <ncurses.h>
-#include <ctype.h>
 
 //Max amount allowed to read from input
 #define BUFFERSIZE 256
@@ -35,8 +29,7 @@
 #define EXIT_KEY "exit"
 #define WHITESPACE " \t\r\n\v\f"
 
-
-
+//Colors
 #define RED   "\x1B[31m"
 #define GRN   "\x1B[32m"
 #define YEL   "\x1B[33m"
@@ -46,70 +39,85 @@
 #define WHT   "\x1B[37m"
 #define RESET "\x1B[0m"
 
-
 enum io_type {STANDARD, OUT_WRITE_FILE, OUT_APPEND_FILE, IN_FILE};
-
 
 char current_dir[BUFFERSIZE];
 char *home_dir;
 
 
+char* replaceHomeDir(char* path){
+  char* str_res = strstr(path, home_dir);
 
+  if(str_res == NULL ){ // not found
+    return path;
+  }else if( (str_res - path) != 0 ){ // not at the beggining
+    return path;
+  }
 
-char *replaceWord(const char *s, const char *oldW,
-                                 const char *newW)
-{
-    char *result;
-    int i, cnt = 0;
-    int newWlen = strlen(newW);
-    int oldWlen = strlen(oldW);
- 
-    // Counting the number of times old word
-    // occur in the string
-    for (i = 0; s[i] != '\0'; i++)
-    {
-        if (strstr(&s[i], oldW) == &s[i])
-        {
-            cnt++;
- 
-            // Jumping to index after the old word.
-            i += oldWlen - 1;
-        }
-    }
- 
-    // Making new string of enough length
-    result = (char *)malloc(i + cnt * (newWlen - oldWlen) + 1);
- 
-    i = 0;
-    while (*s)
-    {
-        // compare the substring with the result
-        if (strstr(s, oldW) == s)
-        {
-            strcpy(&result[i], newW);
-            i += newWlen;
-            s += oldWlen;
-        }
-        else
-            result[i++] = *s++;
-    }
- 
-    result[i] = '\0';
-    return result;
+  char* res = malloc( strlen(path) - strlen(home_dir) + strlen("~") + 1 );
+
+  res[0] = '~';
+
+  strcpy(res+1, path+strlen(home_dir));
+
+  return res;
 }
+
+
+char* getFullPath(char* path){
+
+  char* str_res = strstr(path, "~");
+
+  if(str_res == NULL ){ // not found
+    return path;
+  }else if( (str_res - path) != 0 ){ // not at the beggining
+    return path;
+  }
+
+  char* res = malloc( strlen(path) + strlen(home_dir) - strlen("~") + 1 );
+
+  res[0] = '~';
+
+  strcpy(res, home_dir);
+
+  strcpy(res+strlen(home_dir), path+strlen("~"));
+
+  return res;
+
+}
+
+
+
+char* replaceStrAtBeg(char* str, char* needle, char* replace){
+
+  char* str_res = strstr(str, needle);
+
+  if(str_res == NULL ){ // not found
+    return str;
+  }else if( (str_res - str) != 0 ){ // not at the beggining
+    return str;
+  }
+
+  char* res = malloc( strlen(str) + strlen(replace) - strlen(needle) + 1 );
+
+  strcpy(res, replace);
+
+  strcpy(res+strlen(replace), str+strlen(needle));
+
+  return res;
+
+}
+
 
 
 
 
 void runCommand(char** av, int is_bg,enum io_type ioType, char* ioFile){
 
-  printf(GRN "before if %d %d\n" RESET , getpid(), getppid());
-
   int status;
   int fd[2];
   int child_pid = fork();
 
-  
   if(child_pid < 0){
     printf("Error while forking child process.\n");
   }else if(child_pid == 0){ // child process
@@ -264,11 +272,21 @@ int runPipe2(char** av, int fd_input){
 
 void run_change_dir(char *dir){
 
+  if(!dir) return;
+
   char *home_dir_with_slash = malloc(strlen(home_dir) +2);
   strcpy(home_dir_with_slash, home_dir);
   strcat(home_dir_with_slash, "/");
 
-  char *chdir_path = replaceWord(dir, "~", home_dir_with_slash);
+
+  // char *chdir_path = getFullPath(dir);
+  
+  char *chdir_path = replaceStrAtBeg(dir, "~", home_dir);
+
+
+
+
+
 
   if(chdir(chdir_path) != 0){
     perror("Failed changing directory"); 
@@ -279,8 +297,11 @@ void run_change_dir(char *dir){
 
 void print_prompt(){
   
-  char *result = replaceWord(current_dir, home_dir, "~");
-  
+  //char *result = replaceHomeDir(current_dir);
+
+  char *result = replaceStrAtBeg(current_dir, home_dir, "~");
+
+
   if(strcmp(result, "~")==0){
     result = "~/";
   }
@@ -288,23 +309,6 @@ void print_prompt(){
   printf(GRN PROMPT RESET, result);
 
 }
-
-
-
-int r,c,nrows,ncols;
-void draw(char dc){
-  move(r,c); // curses call to move cursor to row r, column c
-  delch();
-  insch(dc);  // curses calls to replace character under cursor by dc
-  refresh();  // curses call to update screen
-  r++;
-  if(r == nrows){
-    r =0;
-    c++;
-
-  }
-}
-
 
 int main(int* argc, char** argv)
 {
