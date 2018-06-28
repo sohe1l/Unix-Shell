@@ -44,50 +44,7 @@ enum io_type {STANDARD, OUT_WRITE_FILE, OUT_APPEND_FILE, IN_FILE};
 char current_dir[BUFFERSIZE];
 char *home_dir;
 
-
-char* replaceHomeDir(char* path){
-  char* str_res = strstr(path, home_dir);
-
-  if(str_res == NULL ){ // not found
-    return path;
-  }else if( (str_res - path) != 0 ){ // not at the beggining
-    return path;
-  }
-
-  char* res = malloc( strlen(path) - strlen(home_dir) + strlen("~") + 1 );
-
-  res[0] = '~';
-
-  strcpy(res+1, path+strlen(home_dir));
-
-  return res;
-}
-
-
-char* getFullPath(char* path){
-
-  char* str_res = strstr(path, "~");
-
-  if(str_res == NULL ){ // not found
-    return path;
-  }else if( (str_res - path) != 0 ){ // not at the beggining
-    return path;
-  }
-
-  char* res = malloc( strlen(path) + strlen(home_dir) - strlen("~") + 1 );
-
-  res[0] = '~';
-
-  strcpy(res, home_dir);
-
-  strcpy(res+strlen(home_dir), path+strlen("~"));
-
-  return res;
-
-}
-
-
-
+// To replace the ~ with home directory (or opposite)
 char* replaceStrAtBeg(char* str, char* needle, char* replace){
 
   char* str_res = strstr(str, needle);
@@ -109,51 +66,41 @@ char* replaceStrAtBeg(char* str, char* needle, char* replace){
 }
 
 
-
-
-
 void runCommand(char** av, int is_bg,enum io_type ioType, char* ioFile){
 
   int status;
-  int fd[2];
+  //int fd[2];
   int child_pid = fork();
 
   if(child_pid < 0){
     printf("Error while forking child process.\n");
   }else if(child_pid == 0){ // child process
 
-    if(is_bg){
-      fclose(stdin);
-      fopen("/dev/null/", "r");
-    }
+    printf(YEL "ELSE IF %d %d\n" RESET, getpid(), getppid() );
 
-    pipe(fd);
+
+    // if(is_bg){
+    //   fclose(stdin);
+    //   fopen("/dev/null/", "r");
+    // }
 
     int fp;
     if(ioType == OUT_WRITE_FILE){
       fp = open(ioFile, O_TRUNC | O_WRONLY | O_CREAT, 0666);
+      close(1);
+
     }else if(ioType == OUT_APPEND_FILE){
-      printf("appending \n");
       fp = open(ioFile,  O_APPEND | O_WRONLY | O_CREAT, 0666);
+      close(1);
+
     }else if(ioType == IN_FILE){
       fp = open(ioFile, O_RDONLY);
-    }
-
-
-    if(ioType == OUT_WRITE_FILE){
-      close(1);
-      dup(fp);
-      //dup2(fp, 1);
-    }else if(ioType == OUT_APPEND_FILE){
-      close(1);
-      dup(fp);
-      //dup2(fp, 1);
-    }else if(ioType == IN_FILE){
       close(0);
-      dup(fp);
-      //dup2(fp, 0);
     }
-    
+
+    if(ioType != STANDARD){
+      dup(fp);
+    }
 
     if(execvp(av[0], av) == -1){
       if(fp) close(fp);
@@ -162,75 +109,19 @@ void runCommand(char** av, int is_bg,enum io_type ioType, char* ioFile){
       if(fp) close(fp);
       exit(0);
     }
-
-    
-
   }else{ // main process
-
-    printf(BLU "else1 %d %d\n" RESET, getpid(), getppid() );
-
     if(!is_bg){
       while(wait(&status) != child_pid);
     }
-    
-    printf(BLU "else2 %d %d\n" RESET, getpid(), getppid() );
-
-    /*
-    pid_t tpid;
-    do{
-      tpid = wait(&status);
-      if(tpid != child_pid) process_terminated(tpid);
-    }while(tpid != child_pid);
-    */
   }
 }
 
 
+// run pipe by capturing the output for use for another command
+// fd_input is the input for the child 
+// if fd-input is 0, there is no input from any previous pipes
 
-
-
-
-int runPipe(char** av){
-
-  int status;
-  int fd[2];
-  pipe(fd);
-  int child_pid = fork();
-  
-  if(child_pid < 0){
-    printf("Error while forking child process.\n");
-  }else if(child_pid == 0){ // child process
-
-    while((dup2(fd[1], 1)==-1) && (errno==EINTR)){}
-
-    //dup2(fd[1], STDOUT_FILENO);
-    close(fd[1]);
-    close(fd[0]);
-    
-
-    execvp(av[0], av);
-    exit(1);
-
-    
-
-  }else{ // main process
-    close(fd[1]);
-
-    while(wait(&status) != child_pid);
-    return fd[0];
-  }
-
-  
-}
-
-
-
-
-
-
-
-
-int runPipe2(char** av, int fd_input){
+int run_pipe(char** av, int fd_input){
 
   int status;
   int fd_in[2], fd_out[2];
@@ -242,9 +133,11 @@ int runPipe2(char** av, int fd_input){
     printf("Error while forking child process.\n");
   }else if(child_pid == 0){ // child process
 
-    while((dup2(fd_in[0], 0)==-1) && (errno==EINTR)){}
-    close(fd_in[1]);
-    close(fd_in[0]);
+    if(fd_input != 0){
+      while((dup2(fd_in[0], 0)==-1) && (errno==EINTR)){}
+      close(fd_in[1]);
+      close(fd_in[0]);      
+    }
 
     while((dup2(fd_out[1], 1)==-1) && (errno==EINTR)){}
     close(fd_out[1]);
@@ -254,13 +147,16 @@ int runPipe2(char** av, int fd_input){
     exit(1);
 
   }else{ // main process
-    close(fd_in[0]);
-    char buffer[256];
-    int res_file_read;
-    while(res_file_read = read(fd_input, buffer, 256)){
-      write(fd_in[1], buffer, res_file_read);
+    if(fd_input != 0){
+      close(fd_in[0]);
+      char buffer[BUFFERSIZE];
+      int res_file_read;
+      while(res_file_read = read(fd_input, buffer, BUFFERSIZE)){
+        write(fd_in[1], buffer, res_file_read);
+      }
+      close(fd_in[1]);
     }
-    close(fd_in[1]);
+
 
     close(fd_out[1]);
     while(wait(&status) != child_pid);
@@ -270,23 +166,15 @@ int runPipe2(char** av, int fd_input){
   
 }
 
-void run_change_dir(char *dir){
 
+void run_change_dir(char *dir){
   if(!dir) return;
 
   char *home_dir_with_slash = malloc(strlen(home_dir) +2);
   strcpy(home_dir_with_slash, home_dir);
   strcat(home_dir_with_slash, "/");
 
-
-  // char *chdir_path = getFullPath(dir);
-  
   char *chdir_path = replaceStrAtBeg(dir, "~", home_dir);
-
-
-
-
-
 
   if(chdir(chdir_path) != 0){
     perror("Failed changing directory"); 
@@ -296,193 +184,177 @@ void run_change_dir(char *dir){
 
 
 void print_prompt(){
-  
-  //char *result = replaceHomeDir(current_dir);
-
   char *result = replaceStrAtBeg(current_dir, home_dir, "~");
-
 
   if(strcmp(result, "~")==0){
     result = "~/";
   }
 
   printf(GRN PROMPT RESET, result);
-
 }
+
+
+
+char* readTokens(){
+  
+  char input[BUFFERSIZE];
+
+  fgets(input, BUFFERSIZE, stdin);
+
+  // replace new line with \0
+  char *res_search_input = strchr(input, '\n');
+  if(res_search_input != NULL){
+    *res_search_input = '\0'; 
+  }
+
+  if(input == NULL){
+    printf("%s\n", "Error reading input!");
+  }
+
+  char *token = strtok(input, WHITESPACE);
+
+  return token;
+}
+
+
 
 int main(int* argc, char** argv)
 {
 
   //get home path
-  char input[BUFFERSIZE];
-  int input_c = 0;
   char *myargv[256];
   int myargc;
   int is_bg = 0;
   enum io_type ioType;
   char *ioFile;
-
-  // get home dir and remove last slash if any
   home_dir = getenv("HOME");
-  // if(home_dir[ strlen(home_dir) - 1 ] == '/'){
-  //   home_dir[ strlen(home_dir) - 1 ] == '\0';
-  //   printf("UPDATE HDRI\n");
-  // }
-
-  printf("HDIR %s\n", home_dir);
-
   getcwd(current_dir, BUFFERSIZE);
 
 
-while(1){
+  while(1){
 
-  myargc = 0;
-  is_bg = 0;
-  ioType = STANDARD;
-  ioFile = "";
-  int isPipe = 0;
-  int pipe_res_fd = 0;
+    myargc = 0;
+    is_bg = 0;
+    ioType = STANDARD;
+    ioFile = "";
+    int isPipe = 0;
+    int pipe_res_fd = 0;
 
-  print_prompt();
+    print_prompt();
 
-  fgets(input, BUFFERSIZE, stdin);
+    // char *token = readTokens();
 
 
-  char *res_search_input = strchr(input, '\n');
-  if(res_search_input != NULL){
-    *res_search_input = '\0';
-  }
+    char input[BUFFERSIZE];
 
-  if(input == NULL){
-    printf("%s\n", "Goodbyezzzzz!");
-  }
+    fgets(input, BUFFERSIZE, stdin);
 
-  char *token = strtok(input, WHITESPACE);
+    // replace new line with \0
+    char *res_search_input = strchr(input, '\n');
+    if(res_search_input != NULL){
+      *res_search_input = '\0'; 
+    }
 
-  while( token != NULL ) {
+    if(input == NULL){
+      printf("%s\n", "Error reading input!");
+    }
 
-    printf("TOKEN: %s\n", token);
+    char *token = strtok(input, WHITESPACE);
 
-    if(strcmp(token, ">")==0){
 
-      ioType = OUT_WRITE_FILE;
+    while( token != NULL ) {
 
-    }else if(strcmp(token, ">>")==0){
+      printf("TOKEN: %s\n", token);
 
-      ioType = OUT_APPEND_FILE;
+      if(strcmp(token, ">")==0){
 
-    }else if(strcmp(token, "<")==0){
+        ioType = OUT_WRITE_FILE;
 
-      ioType = IN_FILE;
+      }else if(strcmp(token, ">>")==0){
 
-    }else if(strcmp(token, "|")==0){
+        ioType = OUT_APPEND_FILE;
 
-      printf(MAG "Inside pipe %d %d\n" RESET, getpid(), getppid() );
+      }else if(strcmp(token, "<")==0){
 
+        ioType = IN_FILE;
+
+      }else if(strcmp(token, "|")==0){ 
+
+        // reaching a pipe character.. run command and continoue
+
+        myargv[myargc] = '\0';
+        myargc = myargc + 1;
+
+        pipe_res_fd = run_pipe(myargv, pipe_res_fd);
+
+        myargc = 0; //clear args
+
+      }else{
+        if(ioType != STANDARD && strcmp(ioFile,"") == 0){
+          ioFile = token;
+        }else if(ioType != STANDARD && strcmp(ioFile,"") != 0){
+          //printf("Token is: %s   Length: %zu\n", token, strlen(token) );
+          printf("Error. Invalid usage for redirectors.\n");
+          exit(1); // should not really end
+        }else{
+          myargv[myargc] = malloc(strlen(token) + 1);
+          strcpy(myargv[myargc], token);
+          myargc = myargc + 1;
+        }
+
+      }
+
+
+      token = strtok(NULL, WHITESPACE);
+    }
+    if(myargc != 0){
+      // add the end of arguments
       myargv[myargc] = '\0';
       myargc = myargc + 1;
 
-      if(pipe_res_fd == 0 ){
-        printf(MAG "Inside pipe if1 %d %d\n" RESET, getpid(), getppid());
 
-        pipe_res_fd = runPipe(myargv);
-      }else{
-        printf(MAG "Inside pipe if2 %d %d\n" RESET, getpid(), getppid());
-        pipe_res_fd = runPipe2(myargv, pipe_res_fd);
+      if( strcmp(myargv[0], EXIT_KEY) == 0){
+        printf(RED "%s\n" RESET , "Goodbye!");
+        return 0;
       }
 
-
-      //clear args
-      myargc = 0;
-
-
-
-      // printf("AFTER THIS \n");
-      // char buffer[10];
-      // int res_file_read;
-      // while(res_file_read = read(fd, buffer, 10)){
-      //   printf("%s\n", "while");
-      //   write(1, buffer, res_file_read);
-      // }
-      // printf("AFTER THIS \n");
-
-
-  // char *ag[50];
-  //  ag[0] = "grep";
-  //  ag[1] = "txt";
-  //  ag[2] = '\0';
-
-  // int fd4 = runPipe2(ag, fd);
-
-    // char buffer[10];
-    // int res_file_read;
-    // while(res_file_read = read(fd4, buffer, 10)){
-    //   write(1, buffer, res_file_read);
-    // }
-
-    }else{
-      if(ioType != STANDARD && strcmp(ioFile,"") == 0){
-        ioFile = token;
-      }else if(ioType != STANDARD && strcmp(ioFile,"") != 0){
-        printf("Token is: %s   Length: %zu\n", token, strlen(token) );
-        printf("ERROR INVALID PATTERN\n");
-        exit(1); // should noy really end
-      }else{
-        myargv[myargc] = token;
-        myargc = myargc + 1;
+      if( strcmp(myargv[0], "pwd") == 0){
+        printf("%s\n", current_dir);
+        continue;
       }
 
+      if( strcmp(myargv[0], "cd") == 0){
+        run_change_dir(myargv[1]);
+        continue;
+      }
+
+      char *res_search_bg = strchr(myargv[myargc-2], '&');
+      if(res_search_bg != NULL){
+        *res_search_bg = '\0';
+        is_bg = 1;
+      }
+
+      if(pipe_res_fd != 0){
+
+        printf(RED "%s\n" RESET , "Last if");
+
+        pipe_res_fd = run_pipe(myargv, pipe_res_fd);
+
+        char buffer[10];
+        int res_file_read;
+        while(res_file_read = read(pipe_res_fd, buffer, 10)){
+          write(1, buffer, res_file_read);
+        }
+
+        printf(RED "%s\n" RESET , "Last if 2");
+
+      }else{
+        printf(RED "%s\n" RESET , "Last ifELSE");
+
+        runCommand(myargv, is_bg, ioType, ioFile);
+      }
     }
 
-
-    token = strtok(NULL, WHITESPACE);
   }
-   // add the end of arguments
-    myargv[myargc] = '\0';
-    myargc = myargc + 1;
-
-
-
-   if( strcmp(myargv[0], EXIT_KEY) == 0){
-    printf("%s\n", "Goodbye!");
-    return 0;
-   }
-
-   if( strcmp(myargv[0], "pwd") == 0){
-    printf("%s\n", current_dir);
-    continue;
-   }
-
-  if( strcmp(myargv[0], "cd") == 0){
-    run_change_dir(myargv[1]);
-    continue;
-   }
-
-    char *res_search_bg = strchr(myargv[myargc-2], '&');
-    if(res_search_bg != NULL){
-      *res_search_bg = '\0';
-      is_bg = 1;
-    }
-
-    if(pipe_res_fd != 0){
-
-
-      pipe_res_fd = runPipe2(myargv, pipe_res_fd);
-      
-      char buffer[10];
-      int res_file_read;
-      while(res_file_read = read(pipe_res_fd, buffer, 10)){
-        write(1, buffer, res_file_read);
-      }
-
-    }else{
-      
-      runCommand(myargv, is_bg, ioType, ioFile);
-
-    }
-    
-
-
-}
   return 0;
 }
