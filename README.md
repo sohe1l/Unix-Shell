@@ -22,4 +22,5 @@ Simple shell program parsing input and run commands using execvp which supports:
 The following extra credit items are implemented:	
 
 	- Nested pipe commands
+	- Supports combination of nested pipes and redirects (> >> <)
 	- Supports ~ in the prompt text and the 'cd' command.

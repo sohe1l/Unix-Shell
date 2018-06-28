@@ -43,6 +43,8 @@ enum io_type {STANDARD, OUT_WRITE_FILE, OUT_APPEND_FILE, IN_FILE};
 
 char current_dir[BUFFERSIZE];
 char *home_dir;
+char *token;
+char input[BUFFERSIZE];
 
 // To replace the ~ with home directory (or opposite)
 char* replaceStrAtBeg(char* str, char* needle, char* replace){
@@ -62,22 +64,33 @@ char* replaceStrAtBeg(char* str, char* needle, char* replace){
   strcpy(res+strlen(replace), str+strlen(needle));
 
   return res;
-
 }
 
 
-void runCommand(char** av, int is_bg,enum io_type ioType, char* ioFile){
+int run_cmd(char** av, int is_bg,enum io_type ioType, char* ioFile, int is_pipe, int fd_input){
 
   int status;
-  //int fd[2];
+  int fd_in[2], fd_out[2];
+  pipe(fd_in);
+  pipe(fd_out);
   int child_pid = fork();
 
   if(child_pid < 0){
     printf("Error while forking child process.\n");
   }else if(child_pid == 0){ // child process
 
-    printf(YEL "ELSE IF %d %d\n" RESET, getpid(), getppid() );
 
+    if(fd_input != 0){
+      while((dup2(fd_in[0], 0)==-1) && (errno==EINTR)){}
+      close(fd_in[1]);
+      close(fd_in[0]);      
+    }
+
+    if(is_pipe){
+      while((dup2(fd_out[1], 1)==-1) && (errno==EINTR)){}
+      close(fd_out[1]);
+      close(fd_out[0]);
+    }
 
     // if(is_bg){
     //   fclose(stdin);
@@ -110,43 +123,7 @@ void runCommand(char** av, int is_bg,enum io_type ioType, char* ioFile){
       exit(0);
     }
   }else{ // main process
-    if(!is_bg){
-      while(wait(&status) != child_pid);
-    }
-  }
-}
-
-
-// run pipe by capturing the output for use for another command
-// fd_input is the input for the child 
-// if fd-input is 0, there is no input from any previous pipes
-
-int run_pipe(char** av, int fd_input){
-
-  int status;
-  int fd_in[2], fd_out[2];
-  pipe(fd_in);
-  pipe(fd_out);
-  int child_pid = fork();
-  
-  if(child_pid < 0){
-    printf("Error while forking child process.\n");
-  }else if(child_pid == 0){ // child process
-
-    if(fd_input != 0){
-      while((dup2(fd_in[0], 0)==-1) && (errno==EINTR)){}
-      close(fd_in[1]);
-      close(fd_in[0]);      
-    }
-
-    while((dup2(fd_out[1], 1)==-1) && (errno==EINTR)){}
-    close(fd_out[1]);
-    close(fd_out[0]);
     
-    execvp(av[0], av);
-    exit(1);
-
-  }else{ // main process
     if(fd_input != 0){
       close(fd_in[0]);
       char buffer[BUFFERSIZE];
@@ -158,14 +135,16 @@ int run_pipe(char** av, int fd_input){
     }
 
 
-    close(fd_out[1]);
-    while(wait(&status) != child_pid);
-    return fd_out[0];
+    if(is_pipe) close(fd_out[1]);
+
+    if(!is_bg){
+      while(wait(&status) != child_pid);
+    }
+    
+    if(is_pipe) return fd_out[0];
+    else return 0;
   }
-
-  
 }
-
 
 void run_change_dir(char *dir){
   if(!dir) return;
@@ -196,8 +175,6 @@ void print_prompt(){
 
 
 char* readTokens(){
-  
-  char input[BUFFERSIZE];
 
   fgets(input, BUFFERSIZE, stdin);
 
@@ -211,9 +188,7 @@ char* readTokens(){
     printf("%s\n", "Error reading input!");
   }
 
-  char *token = strtok(input, WHITESPACE);
-
-  return token;
+  token = strtok(input, WHITESPACE);
 }
 
 
@@ -227,6 +202,7 @@ int main(int* argc, char** argv)
   int is_bg = 0;
   enum io_type ioType;
   char *ioFile;
+
   home_dir = getenv("HOME");
   getcwd(current_dir, BUFFERSIZE);
 
@@ -242,29 +218,12 @@ int main(int* argc, char** argv)
 
     print_prompt();
 
-    // char *token = readTokens();
-
-
-    char input[BUFFERSIZE];
-
-    fgets(input, BUFFERSIZE, stdin);
-
-    // replace new line with \0
-    char *res_search_input = strchr(input, '\n');
-    if(res_search_input != NULL){
-      *res_search_input = '\0'; 
-    }
-
-    if(input == NULL){
-      printf("%s\n", "Error reading input!");
-    }
-
-    char *token = strtok(input, WHITESPACE);
-
+    // read tokens into token variable
+    readTokens();
 
     while( token != NULL ) {
 
-      printf("TOKEN: %s\n", token);
+      // printf("TOKEN: %s\n", token);
 
       if(strcmp(token, ">")==0){
 
@@ -280,12 +239,12 @@ int main(int* argc, char** argv)
 
       }else if(strcmp(token, "|")==0){ 
 
-        // reaching a pipe character.. run command and continoue
-
+        // reaching a pipe character.. run command and continoue for next command
         myargv[myargc] = '\0';
         myargc = myargc + 1;
 
-        pipe_res_fd = run_pipe(myargv, pipe_res_fd);
+        //pipe_res_fd = run_pipe(myargv, pipe_res_fd);
+        pipe_res_fd = run_cmd(myargv, is_bg, ioType, ioFile, 1, pipe_res_fd);
 
         myargc = 0; //clear args
 
@@ -295,7 +254,7 @@ int main(int* argc, char** argv)
         }else if(ioType != STANDARD && strcmp(ioFile,"") != 0){
           //printf("Token is: %s   Length: %zu\n", token, strlen(token) );
           printf("Error. Invalid usage for redirectors.\n");
-          exit(1); // should not really end
+          break; // move on
         }else{
           myargv[myargc] = malloc(strlen(token) + 1);
           strcpy(myargv[myargc], token);
@@ -307,6 +266,8 @@ int main(int* argc, char** argv)
 
       token = strtok(NULL, WHITESPACE);
     }
+
+    // at this point all the tokens are processed (and checked for any pipes or redirects)
     if(myargc != 0){
       // add the end of arguments
       myargv[myargc] = '\0';
@@ -336,9 +297,8 @@ int main(int* argc, char** argv)
 
       if(pipe_res_fd != 0){
 
-        printf(RED "%s\n" RESET , "Last if");
-
-        pipe_res_fd = run_pipe(myargv, pipe_res_fd);
+        // pipe_res_fd = run_pipe(myargv, pipe_res_fd);
+        pipe_res_fd = run_cmd(myargv, is_bg, ioType, ioFile, 1, pipe_res_fd);
 
         char buffer[10];
         int res_file_read;
@@ -346,12 +306,10 @@ int main(int* argc, char** argv)
           write(1, buffer, res_file_read);
         }
 
-        printf(RED "%s\n" RESET , "Last if 2");
-
       }else{
-        printf(RED "%s\n" RESET , "Last ifELSE");
+        // runCommand(myargv, is_bg, ioType, ioFile);
+        run_cmd(myargv, is_bg, ioType, ioFile, 0, 0);
 
-        runCommand(myargv, is_bg, ioType, ioFile);
       }
     }
 
