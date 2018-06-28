@@ -11,6 +11,7 @@
 
 ## What The Code Does:
 Simple shell program parsing input and run commands using execvp which supports:	
+
 	- Parameters passing
 	- Running commands in the background using&
 	- Redirects; reading input from file (<) and writing or appending to files (> and >>)
@@ -19,5 +20,6 @@ Simple shell program parsing input and run commands using execvp which supports:
 
 ## Extra credit:
 The following extra credit items are implemented:	
-	1 Nested pipe commands
-	2 Supports ~ in the prompt text and the 'cd' command.
+
+	- Nested pipe commands
+	- Supports ~ in the prompt text and the 'cd' command.
